@@ -86,7 +86,7 @@ __global__ void reduce(const float3* __restrict__ dForces, const unsigned int no
 
         next >>= 1;
         src2 = src1 + next;
-        if (tid > 0) return;
+        if (tid != 0 && tid >= next) return;
     }
 
     if (tid == 0)
