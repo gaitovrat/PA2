@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
 	dim3 dimBlock{ THREADS_PER_BLOCK, 1, 1 };
 	dim3 dimGrid{ 1, 1, 1 };
 
-	add1 << <dimGrid, dimBlock >> > (dA, dB, length, dC);
+	add1<<<dimGrid, dimBlock>>>(dA, dB, length, dC);
 
 	checkCudaErrors(cudaMemcpy(pC, dC, sizeInBytes, cudaMemcpyDeviceToHost));
 	checkHostMatrix(pC, sizeInBytes, 1, length, "%d ", "C: ");

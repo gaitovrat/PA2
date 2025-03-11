@@ -54,8 +54,8 @@ int main(int argc, char* argv[])
 
     // TODO: Call kernel
     auto fn = [&] {
-        initMatrix << <gridDim, blockDim >> > (dMatrix, pitch, mCols, mRows);
-        incrementMatrix << <gridDim, blockDim >> > (dMatrix, pitch, mCols, mRows);
+        initMatrix<<<gridDim, blockDim>>>(dMatrix, pitch, mCols, mRows);
+        incrementMatrix<<<gridDim, blockDim>>>(dMatrix, pitch, mCols, mRows);
         };
     gpubenchmark::print_time("initMatrix", fn, 100);
 

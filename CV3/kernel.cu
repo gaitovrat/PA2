@@ -151,8 +151,8 @@ int main(int argc, char* argv[])
 
     for (unsigned int i = 0; i < 1000; i++)
     {
-        reduce << <dimGrid, dimBlock >> > (dForces, NO_FORCES, dFinalForce);
-        add << <dimGrid, dimBlock >> > (dFinalForce, NO_RAIN_DROPS, dDrops);
+        reduce<<<dimGrid, dimBlock>>>(dForces, NO_FORCES, dFinalForce);
+        add<<<dimGrid, dimBlock>> (dFinalForce, NO_RAIN_DROPS, dDrops);
     }
 
     checkDeviceMatrix<float>((float*)dFinalForce, sizeof(float3), 1, 3, "%5.2f ", "Final force");
