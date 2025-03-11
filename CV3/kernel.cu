@@ -86,7 +86,7 @@ __global__ void reduce(const float3* __restrict__ dForces, const unsigned int no
 
         next >>= 1;
         src2 = src1 + next;
-        if (tid >= next) return;
+        if (tid > 0) return;
     }
 
     if (tid == 0)
@@ -108,7 +108,7 @@ __global__ void add(const float3* __restrict__ dFinalForce, const unsigned int n
     //TODO: Add the FinalForce to every Rain drops position.
     unsigned int tid = threadIdx.x;
     unsigned int size = blockDim.x;
-
+    
     while (tid < size)
     {
         dRainDrops[tid].x += dFinalForce->x;
@@ -146,17 +146,20 @@ int main(int argc, char* argv[])
 
     checkCudaErrors(cudaMalloc((void**)&dFinalForce, sizeof(float3)));
 
-    dim3 dimBlock = dim3(TPB, 1);
-    dim3 dimGrid = dim3(1, 1);
+    dim3 reduceDimBlock = dim3(TPB, 1);
+    dim3 reduceDimGrid = dim3(1, 1);
+
+    dim3 addDimBlock = dim3(TPB, 1);
+    dim3 addDimGrid = dim3(1, 1);
 
     for (unsigned int i = 0; i < 1000; i++)
     {
-        reduce<<<dimGrid, dimBlock>>>(dForces, NO_FORCES, dFinalForce);
-        add<<<dimGrid, dimBlock>> (dFinalForce, NO_RAIN_DROPS, dDrops);
+      reduce<<<reduceDimGrid, reduceDimBlock >>>(dForces, NO_FORCES, dFinalForce);
+      add<<<addDimGrid, addDimBlock>>>(dFinalForce, NO_RAIN_DROPS, dDrops);
     }
 
     checkDeviceMatrix<float>((float*)dFinalForce, sizeof(float3), 1, 3, "%5.2f ", "Final force");
-    // checkDeviceMatrix<float>((float*)dDrops, sizeof(float3), NO_RAIN_DROPS, 3, "%5.2f ", "Final Rain Drops");
+    /*checkDeviceMatrix<float>((float*)dDrops, sizeof(float3), NO_RAIN_DROPS, 3, "%5.2f ", "Final Rain Drops");*/
 
     if (hForces)
         delete[] hForces;
