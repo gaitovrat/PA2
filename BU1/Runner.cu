@@ -1,4 +1,5 @@
 ﻿#include <cudaDefs.h>
+#include <benchmark.h>
 #include <random>
 #include <iostream>
 #include <limits>
@@ -47,24 +48,82 @@ __host__ void findMinMaxByDimension(real_t* matrix, real_t* min_vals, real_t* ma
     }
 }
 
-__global__ void discretizeKernel(real_t* __restrict__ input, discrete_t* __restrict__ output, real_t* __restrict__ minValues, real_t* __restrict__ maxValues, const size_t N, const size_t M) 
+__global__ void discretizeKernel(
+        real_t* __restrict__ input,
+        const int inputPitch,
+        discrete_t* __restrict__ output,
+        const int outputPitch,
+        real_t* __restrict__ minValues, 
+        real_t* __restrict__ maxValues, 
+        const int cols, 
+        const int rows,
+        const discrete_t maxDiscreteValue) 
 {
-    size_t idx = threadIdx.x;
-    const size_t offset = blockDim.x;
+    int col = threadIdx.x;
+    int row = 0;
 
-    while (idx < N * M) {
-        size_t vector_idx = idx / M;
-        size_t dim_idx = idx % M;
+    while (col < cols && row < rows) {
+        real_t* rowInput = (real_t*)((char*)input + row * inputPitch);
+        discrete_t *rowOutput = (discrete_t*)((char*)output + row * outputPitch);
 
-        real_t val = input[idx];
-        real_t min_val = minValues[dim_idx];
-        real_t max_val = maxValues[dim_idx];
-        real_t range = max_val - min_val;
+        real_t value = rowInput[col];
+        real_t minValue = minValues[col];
+        real_t maxValue = maxValues[col];
+        real_t range = maxValue - minValue;
 
-        real_t normalized = (val - min_val) / range;
-        output[idx] = static_cast<discrete_t>(normalized * MAX_DISCRETE_VALUE);
+        real_t normalized = (value - minValue) / range;
+        rowOutput[col] = static_cast<discrete_t>(normalized * maxDiscreteValue);
   
-        idx += offset;
+        row += 1;
+    }
+}
+
+__global__ void distanceToOriginKernel(
+    discrete_t* __restrict__ input, 
+    const int pitch,
+    unsigned long long* __restrict__ distances, 
+    const int cols, 
+    const int rows) 
+{
+	int idx = threadIdx.x;
+	int offset = blockDim.x;
+
+	while (idx < rows) {
+        unsigned long long distance = 0;
+		discrete_t* row = (discrete_t*)((char*)input + idx * pitch);
+
+		for (int d = 0; d < cols; d++) {
+			unsigned long long val = row[d];
+			distance += val * val;
+		}
+
+		distances[idx] = distance;
+		idx += offset;
+	}
+}
+
+__global__ void findMaxDistanceKernel(unsigned long long* __restrict__ distances, unsigned long long* __restrict__ maxDistance, const int size) {
+    __shared__ unsigned long long sMaxDistances[256];
+    unsigned int tid = threadIdx.x;
+	int offset = blockDim.x;
+    unsigned long long localMax = 0;
+
+    for (int i = tid; i < size; i += offset) {
+        localMax = MAX(localMax, distances[i]);
+    }
+
+    sMaxDistances[tid] = localMax;
+    __syncthreads();
+
+    for (unsigned int s = offset / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sMaxDistances[tid] = MAX(sMaxDistances[tid], sMaxDistances[tid + s]);
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        *maxDistance = sMaxDistances[0];
     }
 }
 
@@ -83,38 +142,63 @@ int main(int argc, char* argv[])
 
     // Allocate device memory
 	real_t* dData = nullptr;
+    size_t dDataPitch = 0;
 	real_t* dMinValues = nullptr;
 	real_t* dMaxValues = nullptr;
 	discrete_t* dDiscreteData = nullptr;
+	size_t dDiscreteDataPitch = 0;
 
-	checkCudaErrors(cudaMalloc((void**)&dData, sizeInBytes));
+    checkCudaErrors(cudaMallocPitch((void**)&dData, &dDataPitch, M * sizeof(real_t), N));
 	checkCudaErrors(cudaMalloc((void**)&dMinValues, M * sizeof(real_t)));
 	checkCudaErrors(cudaMalloc((void**)&dMaxValues, M * sizeof(real_t)));
-	checkCudaErrors(cudaMalloc((void**)&dDiscreteData, length * sizeof(discrete_t)));
+	checkCudaErrors(cudaMallocPitch((void**)&dDiscreteData, &dDiscreteDataPitch, M * sizeof(discrete_t), N));
 
-    checkCudaErrors(cudaMemcpy(dData, hData, sizeInBytes, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy2D(dData, dDataPitch, hData, M * sizeof(real_t), M * sizeof(real_t), N, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(dMinValues, hMinValues, M * sizeof(real_t), cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(dMaxValues, hMaxValues, M * sizeof(real_t), cudaMemcpyHostToDevice));
 
-	dim3 block{ 256, 1, 1 };
-    dim3 grid{ 1, 1, 1 };
-	std::cout << "Discretize kernel launch parameters: " << grid.x << " " << block.x << std::endl;
-    discretizeKernel<<<grid, block>>>(dData, dDiscreteData, dMinValues, dMaxValues, N, M);
-
-	discrete_t* hDiscreteData = new discrete_t[length];
-	checkCudaErrors(cudaMemcpy(hDiscreteData, dDiscreteData, length * sizeof(discrete_t), cudaMemcpyDeviceToHost));
-    checkHostMatrix(hDiscreteData, length * sizeof(discrete_t), 1, length, "%d ", "C: ");
-	
-	// Cleanup
 	delete[] hData;
-	delete[] hMinValues;
-	delete[] hMaxValues;
-	delete[] hDiscreteData;
+    delete[] hMinValues;
+    delete[] hMaxValues;
 
-	cudaFree(dData);
-	cudaFree(dMinValues);
-	cudaFree(dMaxValues);
+	dim3 block{ M, 1, 1 };
+    dim3 grid{ 1, 1, 1 };
+	std::cout << "Discretize kernel launch parameters: " << block.x << " " << block.y << std::endl;
+    auto discretizeKernelFn = [&] {
+        discretizeKernel<<<grid, block>>>(dData, dDataPitch, dDiscreteData, dDiscreteDataPitch, dMinValues, dMaxValues, M, N, MAX_DISCRETE_VALUE);
+    };
+    gpubenchmark::print_time("discretizeKernel", discretizeKernelFn, 10);
+    cudaFree(dData);
+    cudaFree(dMinValues);
+    cudaFree(dMaxValues);
+
+	unsigned long long* dDistances = nullptr;
+	checkCudaErrors(cudaMalloc((void**)&dDistances, N * sizeof(unsigned long long)));
+	block = { 256, 1, 1 };
+	grid = { 1, 1, 1 };
+	std::cout << "Distance to origin kernel launch parameters: " << block.x << " " << block.y << std::endl;
+	auto distanceToOriginKernelFn = [&] {
+		distanceToOriginKernel<<<grid, block>>>(dDiscreteData, dDiscreteDataPitch, dDistances, M, N);
+	};
+    gpubenchmark::print_time("distanceToOriginKernel", distanceToOriginKernelFn, 100);
+
+	unsigned long long* dMaxDistance = nullptr;
+	checkCudaErrors(cudaMalloc((void**)&dMaxDistance, sizeof(unsigned long long)));
+	block = { 256, 1, 1 };
+	grid = { 1, 1, 1 };
+	std::cout << "Find max distance kernel launch parameters: " << block.x << " " << block.y << std::endl;
+    auto findMaxDistanceKernelFn = [&] {
+        findMaxDistanceKernel<<<grid, block>>>(dDistances, dMaxDistance, N);
+    };
+	gpubenchmark::print_time("findMaxDistanceKernel", findMaxDistanceKernelFn, 100);
+
+	unsigned long long hMaxDistance = 0;
+	checkCudaErrors(cudaMemcpy(&hMaxDistance, dMaxDistance, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+	std::cout << "Max distance: " << hMaxDistance << std::endl;
+
 	cudaFree(dDiscreteData);
+	cudaFree(dDistances);
+	cudaFree(dMaxDistance);
 
 	return 0;
 }
