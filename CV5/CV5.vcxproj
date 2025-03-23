@@ -13,6 +13,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{0B4E1036-AD62-C7FC-9D15-A945566102DD}</ProjectGuid>
     <RootNamespace>CV5</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -42,9 +43,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(SolutionDir)Common\CUDA_12\windows\inc;$(SolutionDir)Common\FreeImage\windows\inc;$(SolutionDir)Common\pg;$(IncludePath)</IncludePath>
+    <OutDir>$(SolutionDir)Build\$(ProjectName)</OutDir>
+    <IntDir>$(SolutionDir)Build\$(ProjectName)\Intermediate</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>$(SolutionDir)Common\CUDA_12\windows\inc;$(SolutionDir)Common\FreeImage\windows\inc;$(SolutionDir)Common\pg;$(IncludePath)</IncludePath>
+    <OutDir>$(SolutionDir)Build\$(ProjectName)</OutDir>
+    <IntDir>$(SolutionDir)Build\$(ProjectName)\Intermediate</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -61,6 +66,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <Include>$(SolutionDir)Common\pg;%(Include)</Include>
+      <CompileOut>$(SolutionDir)Build\$(ProjectName)\CUDA\%(Filename)%(Extension).obj</CompileOut>
     </CudaCompile>
     <PostBuildEvent>
       <Command>copy "$(SolutionDir)Common\FreeImage\windows\bin\x64\*.dll" "$(OutDir)" </Command>
@@ -85,6 +91,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <Include>$(SolutionDir)Common\pg;%(Include)</Include>
+      <CompileOut>$(SolutionDir)Build\$(ProjectName)\CUDA\%(Filename)%(Extension).obj</CompileOut>
     </CudaCompile>
     <PostBuildEvent>
       <Command>copy "$(SolutionDir)Common\FreeImage\windows\bin\x64\*.dll" "$(OutDir)" </Command>
